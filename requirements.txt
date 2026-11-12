@@ -1,0 +1,9 @@
+# 動作を確かめた版に固定している（2026年11月）。上げるときは pytest と scripts/evaluate.py で確かめる
+anthropic==2.8.0
+pydantic==2.14.3
+python-dotenv==1.2.4
+pdfplumber==0.11.10
+pymupdf==2.1
+pandas==3.1.1
+streamlit==1.67.0
+pytest==9.2.0

@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+# src/ に置いた invoice_reader をテストから import できるようにする
+pythonpath = ["src"]
+testpaths = ["tests"]

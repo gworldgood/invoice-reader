@@ -1,0 +1,32 @@
+# 確認画面（app/review.py）の見た目。
+# 参考：Bill One（原本と読み取り値を左右に並べる照合画面）、マネーフォワード クラウド経費（一覧の詰め方）
+# 白地に墨色の文字、操作の色は藍、要確認は朱（朱肉の色）。書体はモリサワの BIZ UD 系。
+
+[theme]
+base = "light"
+primaryColor = "#1E3A5F"              # 藍：承認ボタン、選択中の行
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F5F8"  # 青みのごく薄いグレー：区切り、入力欄の地
+textColor = "#222831"                 # 墨
+redColor = "#C63D2F"                  # 朱：要確認
+redBackgroundColor = "#FBEDEA"
+greenColor = "#2F6B4F"                # 深緑：検算が通ったときだけ
+greenBackgroundColor = "#EAF2ED"
+borderColor = "#D9DEE5"
+dataframeHeaderBackgroundColor = "#F3F5F8"
+linkColor = "#1E3A5F"
+baseRadius = "0.25rem"
+showWidgetBorder = true
+font = "BIZ UDPGothic:https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap"
+# 金額と登録番号は等幅で桁をそろえる
+codeFont = "BIZ UDGothic:https://fonts.googleapis.com/css2?family=BIZ+UDGothic:wght@400;700&display=swap"
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+headless = true
+address = "localhost"  # 自分のPCからだけ開けるようにする
+
+[browser]
+gatherUsageStats = false
