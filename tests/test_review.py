@@ -6,7 +6,15 @@ import pytest
 from invoice_reader import db
 from invoice_reader.config import ensure_data_dirs, load_settings
 from invoice_reader.ground_truth import load_samples
-from invoice_reader.review import ReviewError, approve, changes, load, review_list, save_and_check
+from invoice_reader.review import (
+    ReviewError,
+    approve,
+    changes,
+    field_label,
+    load,
+    review_list,
+    save_and_check,
+)
 
 SAMPLES = {s.file: s for s in load_samples()}
 
@@ -123,3 +131,18 @@ def test_name_is_required(env):
 
     with pytest.raises(ReviewError, match="確認者"):
         save_and_check(conn, sid, load(conn, sid)["data"], " ")
+
+
+@pytest.mark.parametrize(
+    "field, label",
+    [
+        ("total", "請求額"),
+        ("registration_no", "登録番号"),
+        ("recipient", "宛先"),
+        ("is_handwritten", "手書きの請求書"),
+        ("lines[2]", "明細2行目"),
+        ("lines[10].amount", "明細10行目の金額"),
+    ],
+)
+def test_history_field_names_are_shown_in_japanese(field, label):
+    assert field_label(field) == label

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
@@ -18,7 +19,7 @@ from invoice_reader import db
 from invoice_reader.config import Settings
 from invoice_reader.db import INVOICE_FIELDS, LINE_FIELDS
 from invoice_reader.pipeline import done_name, unique_path
-from invoice_reader.validate import Problem, validate
+from invoice_reader.validate import LABELS, Problem, validate
 
 
 class ReviewError(Exception):
@@ -111,6 +112,23 @@ def approve(conn: sqlite3.Connection, settings: Settings, staging_id: int, appro
         db.update_staging(conn, staging_id, status="approved", stored_path=rel)
         src.rename(dest)
     return dest
+
+
+FIELD_LABELS = {**LABELS, "recipient": "宛先", "is_handwritten": "手書きの請求書"}
+LINE_LABELS = {"name": "品名", "qty": "数量", "unit": "単位", "price": "単価", "amount": "金額", "rate": "税率"}
+_LINE_FIELD = re.compile(r"lines\[(\d+)\](?:\.(\w+))?")
+
+
+def field_label(field: str) -> str:
+    """修正の履歴の項目名を、画面に出す日本語にする（total → 請求額、lines[2].amount → 明細2行目の金額）。
+
+    DBには項目名のまま残す（集計やテストで使うため）。日本語にするのは画面に出すときだけ。
+    """
+    m = _LINE_FIELD.fullmatch(field)
+    if m:
+        row, key = m.groups()
+        return f"明細{row}行目" + (f"の{LINE_LABELS.get(key, key)}" if key else "")
+    return FIELD_LABELS.get(field, field)
 
 
 def _line_text(line: dict | None) -> str | None:

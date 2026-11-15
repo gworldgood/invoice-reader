@@ -14,7 +14,7 @@ from shared import open_db, yen
 
 from invoice_reader import db
 from invoice_reader.extract import ExtractError, pdf_to_images
-from invoice_reader.review import ReviewError, approve, load, review_list, save_and_check
+from invoice_reader.review import ReviewError, approve, field_label, load, review_list, save_and_check
 from invoice_reader.validate import LABELS
 
 AMOUNTS = ("taxable_10", "tax_10", "taxable_8", "tax_8", "withholding", "total")
@@ -158,15 +158,26 @@ def detail(settings, conn, sid: int, reviewer: str) -> None:
         if not checked:
             st.caption("値を直して「直した値で検算する」を押し、検算が通ると承認できます。")
 
-        history = db.list_corrections(conn, sid)
-        if history:
-            with st.expander(f"修正の履歴（{len(history)}件）"):
-                st.dataframe(
-                    pd.DataFrame(history)[["corrected_at", "field", "old_value", "new_value", "corrected_by"]]
-                    .rename(columns={"corrected_at": "日時", "field": "項目", "old_value": "元の値",
-                                     "new_value": "直した値", "corrected_by": "確認者"}),
-                    hide_index=True, width="stretch",
-                )
+    # 履歴は画面の幅いっぱいに出す（右半分に置くと、登録番号のような長い値で他の列が1文字ずつに潰れる）
+    history = db.list_corrections(conn, sid)
+    if history:
+        with st.expander(f"修正の履歴（{len(history)}件）"):
+            # 項目名は日本語にし、長い値も切れないよう全文を出す表（st.table）にする
+            st.table(
+                pd.DataFrame(
+                    {
+                        "項目": [field_label(h["field"]) for h in history],
+                        "元の値": [_shown(h["old_value"]) for h in history],
+                        "直した値": [_shown(h["new_value"]) for h in history],
+                        "確認者": [h["corrected_by"] for h in history],
+                        "日時": [h["corrected_at"] for h in history],
+                    }
+                ).set_index("項目")
+            )
+
+
+def _shown(value) -> str:
+    return "（空欄）" if value is None or value == "" else str(value)
 
 
 # ---------- 入力欄 ----------
