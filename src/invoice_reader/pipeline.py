@@ -20,7 +20,7 @@ from pathlib import Path
 
 from invoice_reader import db
 from invoice_reader.config import Settings
-from invoice_reader.extract import Extracted, ExtractError, extract
+from invoice_reader.extract import SUPPORTED_SUFFIXES, Extracted, ExtractError, extract
 from invoice_reader.llm import LLMError, ReadResult
 from invoice_reader.validate import validate
 
@@ -40,11 +40,47 @@ class Outcome:
     read: ReadResult | None = None  # AIを呼んだときの記録（トークン数、時間）
 
 
+class IntakeError(Exception):
+    """受け付けられないファイル（対応していない種類、空のファイル）。"""
+
+
 def run_inbox(settings: Settings, conn: sqlite3.Connection, reader: Reader) -> list[Outcome]:
     """inbox/ にあるファイルを名前順にすべて処理する。"""
+    return [process_file(p, settings, conn, reader) for p in inbox_files(settings)]
+
+
+def inbox_files(settings: Settings) -> list[Path]:
+    """inbox/ で読み取りを待っているファイル。名前が . で始まるもの（書き込み途中など）は除く。"""
     inbox = settings.folder("inbox")
-    files = sorted(p for p in inbox.iterdir() if p.is_file() and not p.name.startswith("."))
-    return [process_file(p, settings, conn, reader) for p in files]
+    return sorted(p for p in inbox.iterdir() if p.is_file() and not p.name.startswith("."))
+
+
+def save_to_inbox(settings: Settings, name: str, data: bytes) -> Path:
+    """画面で受け取ったファイルを inbox/ に置く。同じ名前があれば _2, _3 を付ける。
+
+    書き込みの途中で読み取りが始まらないよう、. で始まる仮の名前で書いてから名前を変える。
+    """
+    base = Path(name.replace("\\", "/")).name  # フォルダの部分は捨てて、ファイル名だけにする
+    if Path(base).suffix.lower() not in SUPPORTED_SUFFIXES:
+        raise IntakeError(f"{base} は読み取れない種類のファイルです（PDF、JPG、PNG のみ）")
+    if not data:
+        raise IntakeError(f"{base} は中身が空のファイルです")
+    inbox = settings.folder("inbox")
+    temp = unique_path(inbox / f".{base}.part")
+    temp.write_bytes(data)
+    dest = unique_path(inbox / base)
+    temp.rename(dest)
+    return dest
+
+
+def recover_processing(settings: Settings) -> list[Path]:
+    """processing/ に残ったファイルを inbox/ に戻す。戻したファイルのパスを返す。
+
+    読み取りの途中で画面やPCが止まると、ファイルが processing/ に残って誰にも見えなくなる。
+    読み取りを始める前（ほかに読み取り中のものがないとき）に呼んで、読み取り待ちに戻す。
+    """
+    folder = settings.folder("processing")
+    return [move_to(p, settings.folder("inbox")) for p in sorted(folder.iterdir()) if p.is_file()]
 
 
 def process_file(path: Path, settings: Settings, conn: sqlite3.Connection, reader: Reader) -> Outcome:
@@ -55,10 +91,11 @@ def process_file(path: Path, settings: Settings, conn: sqlite3.Connection, reade
     existing = db.find_staging_by_hash(conn, file_hash)
     if existing is not None:
         dest = move_to(path, settings.folder("error"))
+        first = db.get_staging(conn, existing)
         problem = {
             "code": "same_file",
             "field": None,
-            "message": f"同じ内容のファイルを処理済みです（staging id {existing}）",
+            "message": f"同じ内容のファイル（{first['file_name']}）をすでに読み取っています",
         }
         return Outcome(file_name, "skipped", dest, existing, [problem])
 

@@ -17,8 +17,9 @@
 
 ```
 src/invoice_reader/   本体（extract, llm, validate, db, pipeline, export）
-app/review.py         確認画面（Streamlit）
-scripts/              run_batch.py（一括処理）、evaluate.py（精度測定）
+app/main.py           画面の入口（Streamlit）。ページは app/views/（読み取り、要確認、登録済み）
+scripts/              open_app.py（画面を開く）、run_batch.py（一括処理）、evaluate.py（精度測定）
+請求書ツールを開く.bat  使う人がダブルクリックで画面を開く
 tests/                テスト
 sample_data/          架空の請求書30枚と正解データ（変更しない）
 data/                 実行時のフォルダとDB（Gitに上げない）
@@ -33,7 +34,7 @@ pytest
 python scripts/run_batch.py
 python scripts/evaluate.py
 python scripts/export_journal.py
-streamlit run app/review.py
+streamlit run app/main.py
 ```
 
 ## 守ること

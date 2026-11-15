@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from invoice_reader.db import INVOICE_FIELDS, connect, init_db, invoice_exists
+from invoice_reader.db import INVOICE_FIELDS, connect, count_staging, init_db, invoice_exists
 
 
 @pytest.fixture
@@ -91,3 +91,11 @@ def test_invoice_exists(conn):
     assert invoice_exists(conn, "発行元A", "INV-1")
     assert not invoice_exists(conn, "発行元A", "INV-2")
     assert not invoice_exists(conn, "発行元B", "INV-1")
+
+
+def test_count_staging(conn):
+    assert count_staging(conn) == {}
+    for h, status in [("h1", "review"), ("h2", "review"), ("h3", "passed")]:
+        conn.execute("UPDATE staging SET status = ? WHERE id = ?", (status, _add_staging(conn, h)))
+
+    assert count_staging(conn) == {"review": 2, "passed": 1}

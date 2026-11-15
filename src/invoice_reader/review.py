@@ -1,4 +1,4 @@
-"""確認画面の裏側の処理。画面（app/review.py）から呼ぶ。作業書「8. 確認画面」。
+"""確認画面の裏側の処理。画面の要確認のページ（app/views/review.py）から呼ぶ。作業書「8. 確認画面」。
 
 - 要確認の一覧を出す
 - 人が直した値を仮テーブルに書き戻し、直した項目を corrections に記録する
@@ -32,7 +32,7 @@ def review_list(conn: sqlite3.Connection) -> list[dict]:
 def load(conn: sqlite3.Connection, staging_id: int) -> dict:
     item = db.get_staging(conn, staging_id)
     if item is None:
-        raise ReviewError(f"staging id {staging_id} がありません")
+        raise ReviewError("この請求書は見つかりませんでした。画面を読み込み直してください。")
     return item
 
 
@@ -63,7 +63,7 @@ def save_and_check(
     """直した値を保存し、直した項目を記録してから検算をやり直す。理由の一覧を返す。"""
     item = load(conn, staging_id)
     if item["status"] != "review":
-        raise ReviewError("要確認ではない請求書は直せません")
+        raise ReviewError("この請求書はすでに確認が終わっているため、直せません")
     if not corrected_by.strip():
         raise ReviewError("確認者の名前を入れてください")
 
@@ -93,7 +93,7 @@ def approve(conn: sqlite3.Connection, settings: Settings, staging_id: int, appro
     """検算が通っていれば本番テーブルへ移し、原本を done/ に移す。移した先のパスを返す。"""
     item = load(conn, staging_id)
     if item["status"] != "review":
-        raise ReviewError("要確認ではない請求書は承認できません")
+        raise ReviewError("この請求書はすでに確認が終わっているため、承認できません")
     if not approved_by.strip():
         raise ReviewError("確認者の名前を入れてください")
     problems = check(conn, item["data"])
@@ -102,7 +102,8 @@ def approve(conn: sqlite3.Connection, settings: Settings, staging_id: int, appro
 
     src = settings.data_dir / item["stored_path"]
     if not src.exists():
-        raise ReviewError(f"原本が見つかりません: {item['stored_path']}")
+        # 画面に出る文なので、フォルダの場所は出さずにファイル名だけを出す
+        raise ReviewError(f"原本のファイル（{item['file_name']}）が見つかりません")
     dest = unique_path(settings.folder("done") / done_name(item["data"], src.suffix))
     rel = dest.relative_to(settings.data_dir).as_posix()
     with conn:  # 本番登録と原本の移動を一緒に行う（pipeline と同じ考え方）

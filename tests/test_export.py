@@ -3,7 +3,7 @@ import csv
 import pytest
 
 from invoice_reader import db
-from invoice_reader.export import HEADER, JournalError, export_csv, journal_rows
+from invoice_reader.export import HEADER, JournalError, export_csv, journal_csv, journal_rows
 from invoice_reader.ground_truth import EXPECTED_STOP, load_samples
 
 GOOD_SAMPLES = [s for s in load_samples() if s.file not in EXPECTED_STOP]
@@ -68,4 +68,30 @@ def test_export_csv(tmp_path):
     rows = list(csv.reader(out.open(encoding="utf-8-sig")))
     assert rows[0] == HEADER
     assert len(rows) == 4
+    conn.close()
+
+
+def test_journal_csv_for_download():
+    invoices = [{**s.invoice, "id": n} for n, s in enumerate(GOOD_SAMPLES[:2], start=1)]
+
+    raw = journal_csv(invoices)
+
+    assert raw.startswith(b"\xef\xbb\xbf")  # Excel 用の BOM
+    rows = list(csv.reader(raw.decode("utf-8-sig").splitlines()))
+    assert rows[0] == HEADER
+    assert {r[0] for r in rows[1:]} == {"1", "2"}  # 伝票番号は請求書ごと
+
+
+def test_unbalanced_invoice_makes_no_file(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    db.init_db(conn)
+    inv = next(s for s in load_samples() if s.file == "invoice_08").invoice  # 請求額が9,000円ずれている
+    with conn:
+        sid = db.insert_staging(conn, file_name="a.pdf", file_hash="h", stored_path=None, data=inv)
+        db.insert_invoice(conn, staging_id=sid, original_path="done/a.pdf", approved_by="auto")
+
+    out = tmp_path / "journal.csv"
+    with pytest.raises(JournalError):
+        export_csv(conn, out)
+    assert not out.exists()
     conn.close()

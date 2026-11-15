@@ -146,6 +146,25 @@ def make_client(settings: Settings) -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 
+def describe_api_error(e: Exception) -> str:
+    """APIそのものの失敗を、画面で使う人向けの文にする。何をすればよいかまで書く。
+
+    ファイルが悪いわけではないので、ファイルは読み取り待ちに残っている（pipeline.process_file）。
+    """
+    again = "少し時間をおいてから、もう一度「読み取る」を押してください。"
+    if isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return "AIの読み取りサービスのAPIキーが使えません。管理者に連絡してください。"
+    if isinstance(e, anthropic.NotFoundError):
+        return "設定されているAIのモデル名が見つかりません。管理者に連絡してください。"
+    if isinstance(e, anthropic.RateLimitError):
+        return "AIの読み取りサービスが混み合っています。" + again
+    if isinstance(e, anthropic.APIConnectionError):  # 時間切れ（APITimeoutError）も含む
+        return "AIの読み取りサービスにつながりませんでした。インターネットの接続を確かめて、" + again
+    if isinstance(e, anthropic.APIStatusError) and e.status_code >= 500:
+        return "AIの読み取りサービスが一時的に使えません。" + again
+    return "読み取りの途中で問題が起きました。管理者に連絡してください。"
+
+
 def read_invoice(
     extracted: Extracted,
     settings: Settings,

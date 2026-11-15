@@ -1,48 +1,21 @@
-"""確認画面。検算で引っかかった請求書を、人が原本を見ながら直して承認する。
-
-    streamlit run app/review.py
+"""要確認のページ。検算で引っかかった請求書を、人が原本を見ながら直して承認する。
 
 画面の部品だけをここに書き、処理（保存、記録、検算、承認）は src/invoice_reader/review.py に任せる。
+見た目（朱の線、等幅の金額など）の CSS は app/main.py にまとめてある。
 """
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from shared import open_db, yen
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from invoice_reader import db  # noqa: E402
-from invoice_reader.config import ensure_data_dirs, load_settings  # noqa: E402
-from invoice_reader.extract import ExtractError, pdf_to_images  # noqa: E402
-from invoice_reader.review import ReviewError, approve, load, review_list, save_and_check  # noqa: E402
-from invoice_reader.validate import LABELS  # noqa: E402
-
-st.set_page_config(page_title="請求書の確認", layout="wide")
-
-# 要確認の項目に朱の線を引く、金額と登録番号を等幅・右寄せにする
-st.html(
-    """
-<style>
-[class*="st-key-flag_"] {
-  border-left: 3px solid #C63D2F;
-  background: #FBEDEA;
-  padding: 0.35rem 0.6rem 0.2rem;
-  border-radius: 0.25rem;
-}
-[class*="st-key-amount_"] input,
-[class*="st-key-regno_"] input {
-  font-family: "BIZ UDGothic", monospace;
-  font-variant-numeric: tabular-nums;
-}
-[class*="st-key-amount_"] input { text-align: right; }
-.reason { color: #C63D2F; font-size: 0.85rem; margin: 0.1rem 0 0.4rem; }
-</style>
-"""
-)
+from invoice_reader import db
+from invoice_reader.extract import ExtractError, pdf_to_images
+from invoice_reader.review import ReviewError, approve, load, review_list, save_and_check
+from invoice_reader.validate import LABELS
 
 AMOUNTS = ("taxable_10", "tax_10", "taxable_8", "tax_8", "withholding", "total")
 
@@ -57,14 +30,8 @@ def page_images(path: str, mtime: float) -> list[bytes]:
 
 
 def main() -> None:
-    settings = load_settings()
-    ensure_data_dirs(settings)
-    conn = db.connect(settings.db_path)
-    db.init_db(conn)
-    try:
+    with open_db() as (settings, conn):
         render(settings, conn)
-    finally:
-        conn.close()
 
 
 def render(settings, conn) -> None:
@@ -72,44 +39,31 @@ def render(settings, conn) -> None:
         st.markdown("#### 確認者")
         reviewer = st.text_input("確認者の名前", key="reviewer", label_visibility="collapsed",
                                  placeholder="名前を入れてから直す・承認する")
-        st.divider()
-        counts = dict(conn.execute("SELECT status, COUNT(*) FROM staging GROUP BY status").fetchall())
-        st.markdown(
-            f"要確認 **{counts.get('review', 0)}** 件  \n"
-            f"登録済み **{counts.get('passed', 0) + counts.get('approved', 0)}** 件"
-            f"（うち人が承認 {counts.get('approved', 0)}）  \n"
-            f"読めなかったファイル **{counts.get('error', 0)}** 件"
-        )
 
-    st.markdown("### 要確認の請求書")
+    st.subheader("要確認の請求書", anchor=False)
     if "notice" in st.session_state:
         st.success(st.session_state.pop("notice"))
 
     items = review_list(conn)
     if not items:
-        st.info("要確認の請求書はありません。`python scripts/run_batch.py` で inbox の請求書を処理できます。")
+        st.info("要確認の請求書はありません。新しい請求書は「読み取り」のページから読み取れます。")
         return
 
+    # 一覧は見るだけの表にし、開く請求書は下の選択欄で選ぶ（表の左端のチェック欄は役割がわかりにくいため）
     table = pd.DataFrame(
         {
-            "ID": [i["id"] for i in items],
             "ファイル": [i["file_name"] for i in items],
             "発行元": [i["issuer"] or "" for i in items],
-            "請求額": [i["total"] for i in items],
+            "請求額": [yen(i["total"]) for i in items],
             "引っかかった理由": [" / ".join(e["message"] for e in i["errors"]) for i in items],
         }
     )
-    event = st.dataframe(
-        table,
-        hide_index=True,
-        width="stretch",
-        on_select="rerun",
-        selection_mode="single-row",
-        key="review_table",
-        column_config={"請求額": st.column_config.NumberColumn(format="%d")},
+    st.dataframe(table, hide_index=True, width="stretch")
+
+    labels = {i["id"]: f"{i['file_name']}　{i['issuer'] or '発行元不明'}" for i in items}
+    staging_id = st.selectbox(
+        "確認する請求書", options=list(labels), format_func=labels.get, key="selected_invoice"
     )
-    rows = event.selection.rows
-    staging_id = int(table.iloc[rows[0] if rows else 0]["ID"])
     detail(settings, conn, staging_id, reviewer)
 
 
@@ -133,7 +87,7 @@ def detail(settings, conn, sid: int, reviewer: str) -> None:
                 for png in page_images(str(path), path.stat().st_mtime):
                     st.image(png, width="stretch")
             except (OSError, ExtractError) as e:
-                st.error(f"原本を表示できません: {e}")
+                st.error("原本の画像を表示できません。ファイルが移動・削除されていないか確認してください。")
 
         with right:
             if item["errors"]:
@@ -169,12 +123,14 @@ def detail(settings, conn, sid: int, reviewer: str) -> None:
 
         with field_box("lines", flagged, sid):
             st.markdown("明細")
+            st.caption("行を足すときは、表の一番下の空いた行に入力します。行を消すときは、行の左端を押して選び、Deleteキーを押します。")
             new["lines"] = lines_editor(data["lines"], sid)
             reasons(flagged, "lines")
 
         _, button_area = st.columns([1, 1], gap="large")
         with button_area:
             submitted = st.form_submit_button("直した値で検算する", width="stretch")
+            st.caption("入力欄でEnterキーを押しても検算します。")
 
     _, right = st.columns([1, 1], gap="large")
     with right:
@@ -189,7 +145,7 @@ def detail(settings, conn, sid: int, reviewer: str) -> None:
 
         checked = st.session_state.get(f"checked_{sid}", False) and not item["errors"]
         if checked:
-            st.success("検算が通りました。承認すると本番に登録し、原本を done/ に移します。")
+            st.success("検算が通りました。「承認して登録する」を押すと登録が確定します。")
         if st.button("承認して登録する", type="primary", disabled=not checked,
                      width="stretch", key=f"approve_{sid}"):
             try:
@@ -197,7 +153,7 @@ def detail(settings, conn, sid: int, reviewer: str) -> None:
             except ReviewError as e:
                 st.error(str(e))
             else:
-                st.session_state["notice"] = f"{item['file_name']} を登録しました（{dest.name}）"
+                st.session_state["notice"] = f"{item['file_name']} を登録しました。"
                 st.rerun()
         if not checked:
             st.caption("値を直して「直した値で検算する」を押し、検算が通ると承認できます。")

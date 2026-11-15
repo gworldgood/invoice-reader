@@ -1,0 +1,2 @@
+# Windows のバッチファイルは改行が CRLF でないと正しく動かないことがある
+*.bat text eol=crlf

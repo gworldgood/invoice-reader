@@ -9,7 +9,14 @@ from invoice_reader import db
 from invoice_reader.config import ensure_data_dirs, load_settings
 from invoice_reader.ground_truth import load_samples
 from invoice_reader.llm import LLMError, ReadResult
-from invoice_reader.pipeline import process_file, run_inbox
+from invoice_reader.pipeline import (
+    IntakeError,
+    inbox_files,
+    process_file,
+    recover_processing,
+    run_inbox,
+    save_to_inbox,
+)
 
 SAMPLES = {s.file: s for s in load_samples()}
 
@@ -84,6 +91,7 @@ def test_same_file_twice_is_not_registered_twice(env):
 
     assert o.status == "skipped"
     assert o.read is None  # AIを呼ぶ前に止まる
+    assert o.problems[0]["message"] == "同じ内容のファイル（invoice_01.pdf）をすでに読み取っています"
     assert (settings.folder("error") / "again.pdf").exists()
     assert count(conn, "invoices") == 1
     assert count(conn, "staging") == 1
@@ -167,3 +175,61 @@ def test_run_inbox_processes_every_file(env):
 
     assert [(o.file_name, o.status) for o in outcomes] == [("invoice_01.pdf", "passed")]
     assert list(settings.folder("inbox").iterdir()) == []
+
+
+# ---------- 画面からファイルを受け取る ----------
+
+
+def test_save_to_inbox_keeps_only_the_file_name(env):
+    settings, _ = env
+    data = SAMPLES["invoice_01"].path.read_bytes()
+
+    dest = save_to_inbox(settings, r"C:\Users\someone\請求書.PDF", data)
+
+    assert dest == settings.folder("inbox") / "請求書.PDF"
+    assert dest.read_bytes() == data
+    assert inbox_files(settings) == [dest]  # 書き込み途中の仮のファイルは残らない
+
+
+def test_save_to_inbox_does_not_overwrite(env):
+    settings, _ = env
+    first = save_to_inbox(settings, "a.pdf", b"%PDF-1")
+    second = save_to_inbox(settings, "a.pdf", b"%PDF-2")
+
+    assert (first.name, second.name) == ("a.pdf", "a_2.pdf")
+    assert first.read_bytes() == b"%PDF-1"
+
+
+@pytest.mark.parametrize(
+    "name, data, message",
+    [
+        ("memo.txt", b"x", "読み取れない種類のファイルです"),
+        ("scan.gif", b"x", "読み取れない種類のファイルです"),
+        ("empty.pdf", b"", "中身が空のファイルです"),
+    ],
+)
+def test_save_to_inbox_rejects(env, name, data, message):
+    settings, _ = env
+    with pytest.raises(IntakeError, match=message):
+        save_to_inbox(settings, name, data)
+    assert list(settings.folder("inbox").iterdir()) == []
+
+
+def test_inbox_files_skips_hidden_files(env):
+    settings, _ = env
+    (settings.folder("inbox") / ".a.pdf.part").write_bytes(b"x")
+    (settings.folder("inbox") / "b.pdf").write_bytes(b"x")
+
+    assert [p.name for p in inbox_files(settings)] == ["b.pdf"]
+
+
+def test_recover_processing_puts_files_back(env):
+    settings, conn = env
+    (settings.folder("processing") / "stuck.pdf").write_bytes(b"x")
+    (settings.folder("inbox") / "stuck.pdf").write_bytes(b"y")  # 同じ名前があっても上書きしない
+
+    recovered = recover_processing(settings)
+
+    assert [p.name for p in recovered] == ["stuck_2.pdf"]
+    assert list(settings.folder("processing").iterdir()) == []
+    assert (settings.folder("inbox") / "stuck.pdf").read_bytes() == b"y"

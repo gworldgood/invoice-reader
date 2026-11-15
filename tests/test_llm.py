@@ -2,6 +2,9 @@
 
 from types import SimpleNamespace
 
+import anthropic
+import httpx2 as httpx  # anthropic SDK が通信に使っているライブラリ。例外を作るのに使う
+
 import pydantic
 import pytest
 
@@ -12,6 +15,7 @@ from invoice_reader.llm import (
     InvoiceData,
     LLMError,
     SYSTEM_PROMPT,
+    describe_api_error,
     read_invoice,
 )
 
@@ -156,3 +160,31 @@ def test_schema_has_every_field_of_section_5():
     from invoice_reader.db import INVOICE_FIELDS
 
     assert set(InvoiceData.model_fields) == set(INVOICE_FIELDS) | {"lines"}
+
+
+REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+
+def _status_error(cls, code):
+    return cls("x", response=httpx.Response(code, request=REQUEST), body=None)
+
+
+@pytest.mark.parametrize(
+    "error, words",
+    [
+        (_status_error(anthropic.AuthenticationError, 401), "APIキー"),
+        (_status_error(anthropic.PermissionDeniedError, 403), "APIキー"),
+        (_status_error(anthropic.NotFoundError, 404), "モデル名"),
+        (_status_error(anthropic.RateLimitError, 429), "混み合って"),
+        (_status_error(anthropic.InternalServerError, 500), "一時的に"),
+        (_status_error(anthropic.APIStatusError, 529), "一時的に"),
+        (anthropic.APIConnectionError(request=REQUEST), "インターネット"),
+        (anthropic.APITimeoutError(request=REQUEST), "インターネット"),
+        (RuntimeError("bug"), "管理者"),
+    ],
+    ids=lambda v: type(v).__name__ if isinstance(v, Exception) else v,
+)
+def test_api_errors_are_explained_for_users(error, words):
+    message = describe_api_error(error)
+    assert words in message
+    assert "Error" not in message and "http" not in message  # 英語のエラー名やURLは出さない

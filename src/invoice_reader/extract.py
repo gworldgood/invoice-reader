@@ -24,6 +24,8 @@ PDF_IMAGE_DPI = 200
 MAX_PAGES = 5
 
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+# 読み取れるファイルの種類（画面で受け付けるときにも使う）
+SUPPORTED_SUFFIXES = (".pdf", *IMAGE_TYPES)
 
 # pdfminer がフォント情報の不足を大量に警告するが、文字の取り出しには影響しないので抑える
 logging.getLogger("pdfminer").setLevel(logging.ERROR)

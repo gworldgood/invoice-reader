@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import sqlite3
 from pathlib import Path
 
@@ -53,16 +54,23 @@ def journal_rows(invoice: dict, slip_no: int) -> list[list]:
     return rows
 
 
-def export_csv(conn: sqlite3.Connection, path: Path) -> int:
-    """本番テーブルの請求書をすべてCSVに書き出す。書き出した請求書の枚数を返す。
+def journal_csv(invoices: list[dict]) -> bytes:
+    """請求書の仕訳をCSVの中身にする。伝票番号は本番テーブルの id。
 
-    Excel で文字化けしないよう、BOM付きの UTF-8 で書く。
+    Excel で文字化けしないよう、BOM付きの UTF-8 にする。
     """
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow(HEADER)
+    for inv in invoices:
+        writer.writerows(journal_rows(inv, slip_no=inv["id"]))
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def export_csv(conn: sqlite3.Connection, path: Path) -> int:
+    """本番テーブルの請求書をすべてCSVに書き出す。書き出した請求書の枚数を返す。"""
     invoices = db.list_invoices(conn)
+    data = journal_csv(invoices)  # 先に全部作り、借方と貸方が合わなければファイルを作らない
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(HEADER)
-        for inv in invoices:
-            writer.writerows(journal_rows(inv, slip_no=inv["id"]))
+    path.write_bytes(data)
     return len(invoices)

@@ -278,6 +278,12 @@ def list_staging(conn: sqlite3.Connection, status: str) -> list[dict]:
     return [{**dict(r), "errors": _from_json(r["errors"])} for r in rows]
 
 
+def count_staging(conn: sqlite3.Connection) -> dict[str, int]:
+    """仮テーブルの状態ごとの件数（review: 3 など）。画面の見出しに出す。"""
+    rows = conn.execute("SELECT status, COUNT(*) AS n FROM staging GROUP BY status").fetchall()
+    return {r["status"]: r["n"] for r in rows}
+
+
 def get_staging(conn: sqlite3.Connection, staging_id: int) -> dict | None:
     """仮テーブルの1件を、作業書5の形の data と、状態などの情報に分けて返す。"""
     row = conn.execute("SELECT * FROM staging WHERE id = ?", (staging_id,)).fetchone()
